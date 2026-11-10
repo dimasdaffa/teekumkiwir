@@ -71,6 +71,8 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
     /// Map of connected or connecting peers keyed by peer ID.
     private var connections: [String: PeerConnection] = [:]
     
+    private var latestBrowseResults: Set<NWBrowser.Result> = []
+
     /// Endpoints currently visible in NWBrowser results keyed by peer ID.
     private var discoveredEndpoints: [String: (endpoint: NWEndpoint, displayName: String?, isGroup: Bool)] = [:]
     
@@ -298,6 +300,7 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
         }
         connections.removeAll()
         discoveredEndpoints.removeAll()
+        latestBrowseResults.removeAll()
         outbox.clear()
         
         for neighbor in await neighborTable.activeNeighbors() {
@@ -410,9 +413,20 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
         return outcome
     }
     
-    /// Current view of directly reachable neighbors from NeighborTable.
+    /// Current view of directly reachable Wi-Fi and Bluetooth links.
     public func activeNeighbors() async -> [NeighborInfo] {
-        await neighborTable.activeNeighbors()
+        // Forward using live links, not the asynchronously updated telemetry registry.
+        // BLE and newly ready Wi-Fi links must be available to the router immediately.
+        let wifi = connections.values.filter { $0.isReady }.map {
+            NeighborInfo(id: $0.peerId, displayName: $0.displayName, state: .connected,
+                rssi: nil, lastSeen: $0.lastSeen, roundTripTimeMs: nil,
+                isGroupMember: $0.isGroupMember, capabilities: $0.capabilities)
+        }
+        return wifi + blePeers.map {
+            NeighborInfo(id: $0, displayName: "Bluetooth peer", state: .connected,
+                rssi: nil, lastSeen: Date(), roundTripTimeMs: nil,
+                isGroupMember: false, capabilities: .standardMesh)
+        }
     }
     
     /// Current queue depth across urgent, normal, and relay queues.
@@ -432,6 +446,12 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
             logEvent("Mesh relay participation enabled.", level: .info)
         }
         
+        // Results may have arrived while relay was disabled. NWBrowser need not emit
+        // another change when only our local preference changes.
+        if enabled, activeSession != nil {
+            handleBrowseResults(latestBrowseResults, changes: [])
+        }
+
         // Update Bonjour TXT record dynamically with relay flag
         if let session = activeSession, let currentListener = listener {
             var txtDict: [String: Data] = [:]
@@ -565,7 +585,7 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
     
     private func startBrowser() throws {
         let params = createParameters()
-        let descriptor = NWBrowser.Descriptor.bonjour(type: serviceType, domain: nil)
+        let descriptor = NWBrowser.Descriptor.bonjourWithTXTRecord(type: serviceType, domain: nil)
         let newBrowser = NWBrowser(for: descriptor, using: params)
         
         newBrowser.stateUpdateHandler = { [weak self] state in
@@ -658,6 +678,7 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
     
     private func handleBrowseResults(_ results: Set<NWBrowser.Result>, changes: Set<NWBrowser.Result.Change>) {
         guard let session = activeSession else { return }
+        latestBrowseResults = results
         
         var currentDiscovered: [String: (endpoint: NWEndpoint, displayName: String?, isGroup: Bool)] = [:]
         
