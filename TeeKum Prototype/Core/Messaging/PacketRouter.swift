@@ -80,10 +80,11 @@ public final class PacketRouter {
                 ciphertext: raw.ciphertext, envelope: envelope, authTag: raw.authTag,
                 using: SymmetricKey(data: session.symmetricKeyData)
             ), let ack = try? ACKPayload.deserialize(from: payload),
-                abs(Date().timeIntervalSince(ack.ackTimestamp)) <= CarryMessageStore.retention else { return }
+                abs(Date().timeIntervalSince(ack.ackTimestamp)) <= CarryMessageStore.retention,
+                ack.responderInitials != session.localInitials else { return }
             await sosViewModel?.processInboundPacket(inbound)
             _ = await chatMessageEngine.processDeliveryACK(rawPacket: raw, fromPeerId: inbound.sourcePeerId)
-            await peerTransport.retainReceivedForCarry(raw)
+            await peerTransport.retainReceivedForCarry(raw, excludingPeerId: inbound.sourcePeerId)
             await relayMeshPacketIfNeeded(inbound, for: session)
             return
         }
@@ -142,8 +143,9 @@ public final class PacketRouter {
             
         case .chatMessage:
             guard let chat = try? ChatMessagePayload.deserialize(from: decrypted),
-                  abs(Date().timeIntervalSince(chat.timestamp)) <= CarryMessageStore.retention else { return }
-            await peerTransport.retainReceivedForCarry(raw)
+                  abs(Date().timeIntervalSince(chat.timestamp)) <= CarryMessageStore.retention,
+                  chat.senderInitials != session.localInitials else { return }
+            await peerTransport.retainReceivedForCarry(raw, excludingPeerId: inbound.sourcePeerId)
             await handleDecryptedChatMessage(inbound: inbound)
             await relayMeshPacketIfNeeded(inbound, for: session)
             
@@ -305,7 +307,7 @@ public final class PacketRouter {
             return
         }
         
-        await peerTransport.retainReceivedForCarry(inbound.rawPacket)
+        await peerTransport.retainReceivedForCarry(inbound.rawPacket, excludingPeerId: inbound.sourcePeerId)
 
         // 3. Deduplicate via 5-minute LRU cache
         let packetKey = PacketKey(wirePacket: inbound.rawPacket)

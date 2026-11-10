@@ -230,7 +230,7 @@ public protocol PeerTransport: Actor {
     func sendPacket(_ data: Data, to peerId: String) async throws
     
     /// Retains authenticated group or policy-approved opaque frames for later delivery.
-    func retainReceivedForCarry(_ packet: RawWirePacket) async
+    func retainReceivedForCarry(_ packet: RawWirePacket, excludingPeerId: String?) async
 
     /// Returns the number of direct peer connections currently established.
     func activeDirectPeerCount() async -> Int
@@ -240,5 +240,5 @@ public protocol PeerTransport: Actor {
 }
 
 public extension PeerTransport {
-    func retainReceivedForCarry(_ packet: RawWirePacket) async {}
+    func retainReceivedForCarry(_ packet: RawWirePacket, excludingPeerId: String?) async {}
 }

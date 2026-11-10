@@ -6,6 +6,39 @@
 ---
 
 
+
+### [2026-11-10 17:38] — Recover cross-group chat and ACKs under edge-link packet loss
+- **Contributor / Agent:** Codex
+- **Status:** Completed code and automated verification; updated physical RF validation pending
+- **Target Phase / Milestone:** Field-reported A–B–C reliability, with B in another group
+
+#### 1. Objective & Scope
+Investigate why cross-group chat fails while location/SOS still arrive. Preserve the user's existing `ordinaryRelayRateLimit = 8.0` workspace edit and provide an Indonesian explanation and field protocol.
+
+#### 2. Changes Made & Files Touched
+- Limiter defaults now read the central configuration; telemetry leaves one ordinary burst token for reliable chat/ACK traffic inside the same total budget. Production and simulated transports select the same budget operation.
+- Carry retries use configurable 2-second spacing for the first three per-link submissions, then 30 seconds; ACKs precede chat, source links are excluded, and actual submissions are counted once. Original TTL/ciphertext/hop bounds remain intact.
+- Foreign ACK/SOS/chat keep their packet priority in the outbox. Relay flags survive queueing/retries; opt-out purges foreign traffic across all lanes and prevents failed callbacks from resurrecting foreign retries.
+- Authenticated duplicate chats generate a fresh delivery ACK without redisplay or chat reflood. Router self-echo guards prevent carry exclusions from affecting locally originated frames.
+- Added/extended carry, outbox, chat-loss, configuration, and rate-reservation regressions.
+- Added `CHAT_RELAY_CROSS_GROUP_FIX_2026-11-10.md` with root causes, file mapping, effective settings, test evidence, limitations, and field steps.
+
+#### 3. Key Decisions & Rationale
+Old transport refill was hardcoded despite the central knob. Carry retry at 30 seconds exceeded the 15-second ACK timeout; lost initial ACKs could not recover through duplicate chat receipt. Foreign traffic lost packet priority and competed with telemetry. Fix retry/ACK/priority behavior instead of claiming that rate changes increase RF range. No packet or cryptographic format changes.
+
+#### 4. Verification & Testing Performed
+- Before fix, the new early-retry regression failed against the old 30-second behavior `[VERIFIED]`.
+- A temporary copy of the engine with ACK recovery removed failed the lost-ACK regression `[VERIFIED]`; repository source was not reverted for that check.
+- CLI chat and carry/BLE suites passed `[VERIFIED]`.
+- Deterministic B→C data loss plus B→A ACK loss recovered in 8 seconds at 0.8, 2, and 8 packets/sec with one displayed message `[VERIFIED]`.
+- App/widget simulator build succeeded; all 17 app suites emitted PASS summaries with no failure markers `[VERIFIED]`. Legacy runner exit code alone is not a success criterion.
+- `git diff --check` passed `[VERIFIED]`. Existing toolchain concurrency warnings remain outside this change.
+
+#### 5. Open Items & Next Steps
+Repeat the documented tests on three physical iPhones. The user's 28.8 m/58 m measurements remain field observations; no new RF range, battery-drain, or locked-screen delivery measurements have been made `[UNKNOWN]`.
+
+---
+
 ### [2026-11-10 16:14] — Repair cross-group communal mesh discovery and forwarding
 - **Contributor / Agent:** Codex
 - **Status:** Completed software changes and automated verification; physical radio validation pending

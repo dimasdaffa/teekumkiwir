@@ -34,6 +34,25 @@ nonisolated enum CarryMessageStoreTests {
         assert(relay.nextTransmission(to: ["C"], now: now.addingTimeInterval(599))?.data == forwarded)
         assert(relay.nextTransmission(to: ["C"], now: now.addingTimeInterval(600)) == nil)
 
+        // An unreliable edge link needs a retry while the 15-second chat ACK window is open.
+        var edge = CarryMessageStore()
+        edge.remember(forwarded, isForeign: true, now: now)
+        edge.markAttempt(forwarded, to: "C", now: now)
+        assert(edge.nextTransmission(to: ["C"], now: now.addingTimeInterval(2)) != nil,
+               "Relay retries must occur before chat's 15-second ACK timeout")
+
+        edge.markAttempt(forwarded, to: "C", now: now.addingTimeInterval(2))
+        edge.markAttempt(forwarded, to: "C", now: now.addingTimeInterval(4))
+        assert(edge.nextTransmission(to: ["C"], now: now.addingTimeInterval(6)) == nil)
+        assert(edge.nextTransmission(to: ["C"], now: now.addingTimeInterval(34)) != nil)
+        assert(edge.nextTransmission(to: ["D"], now: now.addingTimeInterval(6))?.peer == "D")
+        var sources = CarryMessageStore()
+        sources.remember(forwarded, isForeign: true, excludingPeerId: "A", now: now)
+        assert(sources.nextTransmission(to: ["A"], now: now) == nil)
+        sources.remember(frame(hop: 2), isForeign: true, excludingPeerId: "C", now: now)
+        assert(sources.nextTransmission(to: ["A", "C"], now: now) == nil)
+        assert(sources.nextTransmission(to: ["D"], now: now)?.data == forwarded)
+
         var ackStore = CarryMessageStore()
         let ack = frame(2, type: .ack, hop: 8)
         ackStore.remember(ack, isForeign: false, now: now)
