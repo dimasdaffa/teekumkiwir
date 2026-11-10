@@ -881,7 +881,7 @@ public enum RelayPolicyTests {
         await managerA.recordForwardEvent(type: envB.type)
         
         let teleA = await managerA.snapshot()
-        guard teleA.totalPacketsForwarded == 1, outboxA.relayCount == 1 else {
+        guard teleA.totalPacketsForwarded == 1, outboxA.urgentCount == 1 else {
             print("  FAIL: Node A failed to forward Node B's stranger packet: forwarded=\(teleA.totalPacketsForwarded), relayCount=\(outboxA.relayCount)")
             return false
         }

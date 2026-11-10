@@ -395,9 +395,10 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
                 throw TransportError.rateLimitExceeded("Urgent SOS forwarding budget exceeded")
             }
         } else {
-            let allowed = await rateLimiter.consumeOrdinaryToken()
+            let allowed = packetType == .chatMessage || packetType == .ack
+                ? await rateLimiter.consumeOrdinaryToken() : await rateLimiter.consumeTelemetryToken()
             guard allowed else {
-                throw TransportError.rateLimitExceeded("Ordinary relay budget exceeded (2 pkts/sec)")
+                throw TransportError.rateLimitExceeded("Ordinary relay budget exhausted")
             }
         }
         
@@ -1064,19 +1065,19 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
     }
 
     /// Input is already authenticated by PacketRouter for group traffic, or policy-approved for strangers.
-    public func retainReceivedForCarry(_ packet: RawWirePacket) {
+    public func retainReceivedForCarry(_ packet: RawWirePacket, excludingPeerId: String? = nil) {
         guard activeSession != nil,
               packet.envelope.hopCount < packet.envelope.hopLimit else { return }
         var forwarded = packet
         forwarded.envelope.hopCount += 1
-        if let data = try? forwarded.toWireData() { rememberForCarry(data) }
+        if let data = try? forwarded.toWireData() { rememberForCarry(data, excludingPeerId: excludingPeerId) }
     }
 
-    private func rememberForCarry(_ data: Data) {
+    private func rememberForCarry(_ data: Data, excludingPeerId: String? = nil) {
         guard let session = activeSession, let packet = try? RawWirePacket.fromWireData(data) else { return }
         let foreign = packet.envelope.sessionId != session.sessionId
         guard !foreign || isRelayEnabled else { return }
-        carryStore.remember(data, isForeign: foreign)
+        carryStore.remember(data, isForeign: foreign, excludingPeerId: excludingPeerId)
     }
 
     public func updateCarryPowerMetrics(_ batteryLevel: Float, isLowPowerMode: Bool) {
@@ -1086,13 +1087,15 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
     private func replayCarriedMessage() async {
         guard carryPowerPermitted, activeSession != nil, currentState != .stopped else { return }
         let peers = (connections.values.filter { $0.isReady }.map(\.peerId) + blePeers).sorted()
+        let generation = radioGeneration
         guard carryStore.nextTransmission(to: peers) != nil,
-              await rateLimiter.consumeOrdinaryToken(), activeSession != nil else { return }
-        guard let next = carryStore.nextTransmission(to: peers) else { return }
+              await rateLimiter.consumeOrdinaryToken(), activeSession != nil,
+              generation == radioGeneration, carryPowerPermitted else { return }
+        guard let next = carryStore.nextTransmission(to: peers),
+              !next.isForeign || isRelayEnabled else { return }
         do {
             // Already incremented when custody was taken: retries never spend another hop.
             try outbox.enqueue(data: next.data, destinationPeerId: next.peer, isRelay: next.isForeign)
-            carryStore.markAttempt(next.data, to: next.peer)
             triggerOutboxFlush()
         } catch {
             logEvent("Carry enqueue deferred: \(error)", level: .warning)
@@ -1113,6 +1116,7 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
     private func drainOutbox() async {
         let generation = radioGeneration
         while generation == radioGeneration, let item = outbox.dequeue() {
+            guard !item.isRelay || isRelayEnabled else { continue }
             let readyPeers = connections.values.filter { $0.isReady }
             
             if let targetId = item.destinationPeerId {
@@ -1209,6 +1213,8 @@ public actor PeerTransportService: PeerTransport, MeshTransport {
         lastErrorMessage = error.localizedDescription
         logEvent("Transmission error for \(outboxItem.packetType): \(error.localizedDescription)", level: .warning)
         
+        // Do not resurrect a foreign retry after the user/power policy stopped relaying.
+        guard !outboxItem.isRelay || isRelayEnabled else { return }
         // If retries remain (urgent SOS/ACK or distant relay), requeue with configurable backoff
         if outbox.requeueForRetry(outboxItem) {
             let attempt = outboxItem.attemptCount + 1

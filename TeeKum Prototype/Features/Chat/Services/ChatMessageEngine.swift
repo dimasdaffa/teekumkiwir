@@ -440,6 +440,10 @@ public actor ChatMessageEngine {
         let packetKey = PacketKey(wirePacket: rawPacket)
         let isDuplicate = await seenPacketCache.isDuplicateAndRecord(packetKey, now: clock.now())
         if isDuplicate || seenChatSequences.contains(envelope.sequenceNumber) {
+            // The first ACK may have been lost. Confirm authenticated receipt again,
+            // without adding another message or forwarding the chat again.
+            try await sendDeliveryACK(for: rawPacket, senderInitials: payload.senderInitials,
+                receivedRssi: receivedRssi ?? -70)
             return .droppedDuplicate(sequenceNumber: envelope.sequenceNumber)
         }
         seenChatSequences.insert(envelope.sequenceNumber)
