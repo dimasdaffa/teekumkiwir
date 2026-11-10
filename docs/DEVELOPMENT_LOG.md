@@ -5,6 +5,39 @@
 
 ---
 
+
+### [2026-11-10 16:14] — Repair cross-group communal mesh discovery and forwarding
+- **Contributor / Agent:** Codex
+- **Status:** Completed software changes and automated verification; physical radio validation pending
+- **Target Phase / Milestone:** Mesh transport — A/C in one group, intermediary B in another
+
+#### 1. Objective & Scope
+Restore discovery and opaque forwarding through a participating phone in another group, preserving group encryption and existing relay consent/power gates. Consulted the local Teekum Beta and Teekum Apps project sources for context.
+
+#### 2. Changes Made & Files Touched
+- `Core/Transport/PeerTransportService.swift`: request Bonjour TXT metadata used for session/relay classification; retain browser results and re-evaluate them on relay enable; expose live Wi-Fi/BLE links to forwarding rather than relying on asynchronous neighbor telemetry.
+- `Core/Mesh/RelayPolicyManager.swift` and `App/TeeKumApp.swift`: synchronize all persisted participation modes before session discovery, preserving timed expiry and applying current power metrics.
+- `Core/Messaging/PacketRouter.swift` and `Core/Transport/PeerTransport.swift`: inject transport protocols to exercise the production router, use the transport's live neighbors, retain carry support, and count forwarding only after a successful submission.
+- `Tests/Core/RelayPolicyTests.swift`: add production-router cross-group chat/SOS/reverse-ACK verification, ciphertext/tag preservation, foreign-key decryption rejection, deduplication/opt-out, persisted consent/expiry, and exclusion of neighbors without live links.
+- `Phase 2/PHYSICAL_DEVICE_MESH_TRANSPORT_TEST.md`: add a concrete cross-group and relay re-enable hardware checklist.
+
+#### 3. Key Decisions & Rationale
+The browser previously used `.bonjour` while its filtering logic depended on TXT metadata. Local relay changes also did not reconsider previously filtered browser results. Foreign forwarding used the asynchronously maintained neighbor registry while same-group forwarding broadcast directly on live links. Use TXT-aware discovery and live links consistently. Intermediate phones continue forwarding ciphertext without importing another group's key; packet size, encryption, hop limits, budgets, and power thresholds are unchanged.
+
+#### 4. Verification & Testing Performed
+- Baseline simulator app/widget build and all 17 suites passed before edits `[VERIFIED]`.
+- Updated app/widget simulator build succeeded with Xcode on iPhone 17 Pro simulator `[VERIFIED]`.
+- All 17 in-app suites completed with no failure markers, including all 15 relay-policy tests and the new production-router regressions `[VERIFIED]`. The legacy runner discards suite return values, so output was checked rather than relying solely on exit status.
+- `bash scripts/test-chat.sh`: passed `[VERIFIED]`.
+- `bash scripts/test-carry.sh`: carry-store and BLE-framing suites passed `[VERIFIED]`.
+- `git diff --check`: passed `[VERIFIED]`.
+- Existing Swift concurrency warnings remain; this task does not migrate the project to Swift 6 language mode.
+
+#### 5. Open Items & Next Steps
+Run the added checklist on three physical iPhones. Automated production-router tests use simulated radio links; Wi-Fi/Bluetooth propagation, OS permission behavior, and locked/background operation are not established by those tests `[UNKNOWN]`.
+
+---
+
 ### [2026-11-04 23:29] — Complete Decommissioning & Clean Removal of Nearby Interaction (UWB Precision Finding)
 - **Contributor / Agent:** Antigravity (Advanced Agentic Coding Assistant)
 - **Status:** Completed & Verified (Clean Build, 100% Tests Passing Across All Suites on iPhone 18 Pro Simulator, Zero UWB Dependencies, Resilient Tactical Radar Active)

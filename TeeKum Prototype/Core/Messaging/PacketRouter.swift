@@ -23,7 +23,7 @@ public final class PacketRouter {
     // MARK: - Dependencies
     
     private let cryptoService: CryptoServiceProvider
-    private let peerTransport: PeerTransportService
+    private let peerTransport: any PeerTransport & MeshTransport
     private let relayPolicyManager: RelayPolicyManager
     private let routeDiscoveryService: RouteDiscoveryService
     private let chatMessageEngine: ChatMessageEngine
@@ -39,7 +39,7 @@ public final class PacketRouter {
     
     public init(
         cryptoService: CryptoServiceProvider,
-        peerTransport: PeerTransportService,
+        peerTransport: any PeerTransport & MeshTransport,
         relayPolicyManager: RelayPolicyManager,
         routeDiscoveryService: RouteDiscoveryService,
         chatMessageEngine: ChatMessageEngine,
@@ -318,16 +318,20 @@ public final class PacketRouter {
         // 4. Rate-limited blind forwarding to neighboring direct links
         do {
             let wireData = try inbound.rawPacket.toWireData()
-            let directPeers = await peerTransport.neighborTable.activeNeighbors()
+            let directPeers = await peerTransport.activeNeighbors()
             let eligible = directPeers.filter { $0.id != inbound.sourcePeerId }
+            var forwarded = false
             for peer in eligible {
                 do {
                     _ = try await peerTransport.forwardFrame(wireData, to: peer.id)
+                    forwarded = true
                 } catch {
                     print("[PacketRouter] Forward to stranger relay peer \(peer.id) failed: \(error)")
                 }
             }
-            await relayPolicyManager.recordForwardEvent(type: envelope.type)
+            if forwarded {
+                await relayPolicyManager.recordForwardEvent(type: envelope.type)
+            }
         } catch {
             print("[PacketRouter] Stranger relay dropped: \(error)")
         }

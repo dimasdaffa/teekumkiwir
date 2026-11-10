@@ -370,12 +370,13 @@ struct TeeKumApp: App {
         
         // 4. Start Radio Transport
         do {
-            // Synchronize in-memory relay policy manager if user opted into Communal Mesh Compact
-            let savedModeRaw = UserDefaults.standard.string(forKey: "com.teekum.relay.participationMode")
-            if let savedMode = RelayParticipationMode(rawValue: savedModeRaw ?? ""), savedMode == .communalRelayActive {
-                await relayPolicyManager.setParticipationMode(.communalRelayActive)
-            }
-            
+            // Apply consent and power gates before Bonjour advertises or filters peers.
+            await relayPolicyManager.synchronizePersistedParticipation()
+            await relayPolicyManager.updatePowerMetrics(
+                batteryLevel: locationService.currentBatteryLevel,
+                isLowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+            )
+
             try await peerTransport.start(serviceType: "_teekum._tcp", session: session)
             await peerTransport.updateCarryPowerMetrics(
                 locationService.currentBatteryLevel,
